@@ -248,13 +248,27 @@ class GeminiClient:
                             "name": func_def.get("name"),
                             "description": func_def.get("description"),
                         }
-                        # 获取 parameters 并移除可能存在的 $schema 字段
+                        # 获取 parameters 并进行深度清洗，移除 Gemini 不支持的字段
                         parameters = func_def.get("parameters")
-                        if isinstance(parameters, dict) and "$schema" in parameters:
-                            parameters = parameters.copy()
-                            del parameters["$schema"]
+                        
+                        def clean_schema(schema_obj):
+                            """递归清理 Gemini 不支持的 JSON Schema 高级属性"""
+                            if isinstance(schema_obj, dict):
+                                cleaned = {}
+                                # 包含导致 400 错误的 patternProperties 以及其他不兼容字段
+                                invalid_keys = {"patternProperties", "$schema", "default", "additionalProperties", "anyOf", "oneOf", "allOf"}
+                                for k, v in schema_obj.items():
+                                    if k in invalid_keys:
+                                        continue # 遇到不支持的字段，直接剔除
+                                    cleaned[k] = clean_schema(v)
+                                return cleaned
+                            elif isinstance(schema_obj, list):
+                                return [clean_schema(item) for item in schema_obj]
+                            else:
+                                return schema_obj
+
                         if parameters is not None:
-                            declaration["parameters"] = parameters
+                            declaration["parameters"] = clean_schema(parameters)
 
                         # 移除值为 None 的键，以保持 payload 清洁
                         declaration = {
