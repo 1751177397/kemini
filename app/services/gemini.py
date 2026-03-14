@@ -154,6 +154,32 @@ class GeminiClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
+    def _clean_gemini_tools(self, data: Dict[str, Any]):
+        """全局拦截：深度清洗即将发送给 Gemini 的 tools 字典"""
+        if "tools" not in data or not isinstance(data["tools"], list):
+            return
+
+        def clean_schema(schema_obj):
+            if isinstance(schema_obj, dict):
+                cleaned = {}
+                invalid_keys = {"patternProperties", "$schema", "default", "additionalProperties", "anyOf", "oneOf", "allOf"}
+                for k, v in schema_obj.items():
+                    if k in invalid_keys:
+                        continue  # 遇到非法关键字，直接剔除
+                    cleaned[k] = clean_schema(v)
+                return cleaned
+            elif isinstance(schema_obj, list):
+                return [clean_schema(item) for item in schema_obj]
+            else:
+                return schema_obj
+
+        # 遍历所有工具，揪出并清洗 parameters
+        for tool_obj in data["tools"]:
+            if "function_declarations" in tool_obj and isinstance(tool_obj["function_declarations"], list):
+                for func in tool_obj["function_declarations"]:
+                    if "parameters" in func:
+                        func["parameters"] = clean_schema(func["parameters"])
+
     # 请求参数处理
     def _convert_request_data(
         self, request, contents, safety_settings, system_instruction
@@ -190,6 +216,10 @@ class GeminiClient:
 
             data.setdefault("tools", []).append({"google_search": {}})
             model = request.model.removesuffix("-search")
+
+        # ====== 新增：在发包前的最后一刻，做全局深度清洗 ======
+        self._clean_gemini_tools(data)
+        # ====================================================
 
         return api_version, model, data
 
