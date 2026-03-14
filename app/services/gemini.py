@@ -78,9 +78,31 @@ class GeminiResponseWrapper:
 
     def _extract_finish_reason(self) -> Optional[str]:
         try:
-            return self._data["candidates"][0].get("finishReason")
+            candidate = self._data["candidates"][0]
+            reason = candidate.get("finishReason")
+            
+            # 1. 如果 Gemini 返回了工具调用，OpenAI 格式强制要求 finish_reason 为 "tool_calls"
+            parts = candidate.get("content", {}).get("parts", [])
+            has_function_call = any(isinstance(p, dict) and "functionCall" in p for p in parts)
+            if has_function_call:
+                return "tool_calls"
+                
+            # 2. 如果没有返回 reason，默认给 stop
+            if not reason:
+                return "stop"
+                
+            # 3. 将 Gemini 的大写状态码映射为 OpenAI 标准的小写状态码
+            reason_mapping = {
+                "STOP": "stop",
+                "MAX_TOKENS": "length",
+                "SAFETY": "content_filter",
+                "RECITATION": "content_filter",
+                "OTHER": "stop"
+            }
+            return reason_mapping.get(reason, reason.lower())
+            
         except (KeyError, IndexError):
-            return None
+            return "stop"
 
     def _extract_prompt_token_count(self) -> Optional[int]:
         try:
