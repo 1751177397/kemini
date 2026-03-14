@@ -28,6 +28,34 @@ class GeneratedText:
 class GeminiResponseWrapper:
     def __init__(self, data: Dict[Any, Any]):
         self._data = data
+        
+        # ====== 新增：在初始化时，直接“篡改”底层原始数据中的 finishReason ======
+        try:
+            if "candidates" in self._data and len(self._data["candidates"]) > 0:
+                candidate = self._data["candidates"][0]
+                reason = candidate.get("finishReason")
+                
+                # 1. 检查是不是工具调用
+                parts = candidate.get("content", {}).get("parts", [])
+                has_function_call = any(isinstance(p, dict) and "functionCall" in p for p in parts)
+                
+                if has_function_call:
+                    # 如果有函数调用，强制让底层状态变成 tool_calls
+                    candidate["finishReason"] = "tool_calls"
+                elif reason:
+                    # 2. 将大写状态码映射为小写
+                    reason_mapping = {
+                        "STOP": "stop",
+                        "MAX_TOKENS": "length",
+                        "SAFETY": "content_filter",
+                        "RECITATION": "content_filter",
+                        "OTHER": "stop"
+                    }
+                    candidate["finishReason"] = reason_mapping.get(reason, reason.lower())
+        except Exception as e:
+            pass  # 忽略解析错误，保证流程继续
+        # =========================================================================
+
         self._text = self._extract_text()
         self._finish_reason = self._extract_finish_reason()
         self._prompt_token_count = self._extract_prompt_token_count()
